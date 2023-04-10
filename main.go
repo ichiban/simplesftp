@@ -54,12 +54,14 @@ func main() {
 	for {
 		nConn, err := l.Accept()
 		if err != nil {
-			log.Fatalf("l.Accept(): %v", err)
+			log.Printf("l.Accept(): %v", err)
+			continue
 		}
 
 		_, chs, reqs, err := ssh.NewServerConn(nConn, &config)
 		if err != nil {
-			log.Fatalf("ssh.NewServerConn(): %v", err)
+			log.Printf("ssh.NewServerConn(): %v", err)
+			continue
 		}
 
 		go ssh.DiscardRequests(reqs)
@@ -67,37 +69,39 @@ func main() {
 		for ch := range chs {
 			if ch.ChannelType() != "session" {
 				if err := ch.Reject(ssh.UnknownChannelType, "unknown channel type"); err != nil {
-					log.Fatal(err)
+					log.Printf("ch.Reject(): %v", err)
 				}
 				continue
 			}
 
 			channel, requests, err := ch.Accept()
 			if err != nil {
-				log.Fatalf("ch.Accept(): %v", err)
+				log.Printf("ch.Accept(): %v", err)
+				continue
 			}
 
 			go func(in <-chan *ssh.Request) {
 				for req := range in {
 					if err := req.Reply(req.Type == "subsystem" && string(req.Payload[4:]) == "sftp", nil); err != nil {
-						log.Fatalf("req.Reply(): %v", err)
+						log.Printf("req.Reply(): %v", err)
 					}
 				}
 			}(requests)
 
 			server, err := sftp.NewServer(channel)
 			if err != nil {
-				log.Fatalf("sftp.NewServer(): %v", err)
+				log.Printf("sftp.NewServer(): %v", err)
+				continue
 			}
 
 			go func() {
+				log.Printf("server.Serve(): %s", nConn.RemoteAddr())
 				switch err := server.Serve(); {
 				case err == nil:
 					break
 				case errors.Is(err, io.EOF):
-					if err := server.Close(); err != nil {
-						log.Fatalf("server.Close(): %v", err)
-					}
+					_ = server.Close()
+					log.Printf("server.Close(): %s, %v", nConn.RemoteAddr(), err)
 				default:
 					log.Fatalf("server.Serve(): %v", err)
 				}
